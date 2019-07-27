@@ -1,0 +1,447 @@
+---
+title: <center> <h1>Projet R MCMC</h1> </center>
+author: <center> <h1>John Sibony</h1> </center>
+output: bookdown::html_document2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+time = Sys.time()
+```
+
+
+# Modèle n°6 : Probit {-}
+
+
+$\\$
+
+### Simulation. {-}
+
+1. Explain how to sample from the model. Code the procedure in a function rgen.
+
+We have the following probit model :
+$$
+ P(Y=1|X=x)=\Phi(\alpha+\beta x ±\epsilon) \\
+ X \text{~ }\mathcal{U}(-1;\,1) \\
+ \epsilon \text{~ }\mathcal{N}(0,\,1) \\ 
+ \alpha \text{~}\mathcal{N}(0,\,1) ~~~~~~
+ \beta|X=x \text{ ~ }\mathcal{N}(0,\,\frac{n}{\sum_{i=1}^n x_i})
+$$
+We have to fix a number n. Then we simulate the iid $(x_i)_{i=1...n}$ according to a uniform law on {-1,1}. We can now simulate the parameter $\epsilon$, $\alpha$ and $\beta$ according to their normal law. Finally, we simulate V an independant standard gaussian law and take y=1 if z<$\alpha$+$\beta$x+$\epsilon$, y=0 otherwise.
+
+```{r}
+rgen = function(n, model='first') { #generation of the data : n=number of observation, model : first for questions 1 to 8; second for the question 9
+  
+  if(model=='first'){
+  x = sample(c(-1,1), n, replace=T) #sample x
+  }
+  else if(model=='second'){
+    x = runif(n, min=-1, max=1)
+  }
+  eps = rnorm(n) # n independent noises
+  alpha = rnorm(1, 0, 1) # 1 alpha simulated for the dataset
+  beta = rnorm(1, 0, 1) # 1 beta simulated for the dataset
+  y = 1*(rnorm(n)<alpha+beta*x+eps*1*(model=='first')) #sample y according the probit model
+  
+  return (rbind(x,y,alpha,beta))
+}
+```
+
+$\\$
+
+2. Data may contains noise, a systematic bias or missing/censored values. Give a function tr.dat
+which transforms a sample such that it has one or several of the aforementioned pecularities.
+
+We create some biaises noise in the $x_i$'s by adding a normal(0.5, 1) law. We also keep only 95% of the dateset.
+
+```{r}
+tr.dat = function(sample){ #transformation of the x's : the model becomes a continuous probit model
+  
+  n = dim(sample)[2] # number of observation of the dataset
+  keep = sample(1:n, 0.95*n, replace=F) # keep randomly only 95% of the data
+  sample = sample[,keep]
+  sample[1,] = sample[1,] + rnorm(0.95*n, 0.5,1) # add some noise with biais to the x's
+  
+  return (sample)
+}
+```
+
+### Parameter inference. {-}
+
+$\\$
+
+3. Explain how to infer model’s parameters with one or several simulation based approaches and
+give the corresponding code.
+
+Let's compute the posterior law of the parameters. It's obvious that $\alpha$ and $\beta$ are not independant knowing (X, Y) since they are linked by $\Phi$ (but they stay independant without any conditionnal knowledge). So, we need to compute the posterior law of the couple. By denoting $p(X)$ the density of a random variabe X, we have by the bayes formula :
+
+$$\begin{aligned}
+p(\alpha, \beta|x,y,\epsilon) &\propto p(x,y|\alpha, \beta, \epsilon)p(\epsilon)p(\alpha)p(\beta)\\
+&=  p(y|x,\alpha, \beta, \epsilon)p(x|\alpha, \beta)p(\epsilon)p(\alpha)p(\beta)  \\
+&= p(y|x,\alpha, \beta, \epsilon)p(x)p(\epsilon)p(\alpha)p(\beta) \\
+&\propto p(y|x,\alpha, \beta, \epsilon)p(\epsilon)p(\alpha)p(\beta) \\
+\end{aligned}$$
+
+But since $y|x,\alpha, \beta$ take values in {0,1}, it can be viewed as a bernouilli law with parameter $\Phi(\alpha+\beta x +\epsilon)$. Finally we have :
+
+$$
+p(\alpha, \beta|x,y,\epsilon)=\frac{\prod_{i=1}^n \Phi(\alpha+\beta x_i +\epsilon_i)^{y_i} (1-\Phi(\alpha+\beta x_i +\epsilon_i))^{1-y_i} p(\epsilon)p(\alpha)p(\beta)}{\int\int\prod_{i=1}^n \Phi(\alpha+\beta x_i +\epsilon_i)^{y_i} (1-\Phi(\alpha+\beta x_i +\epsilon_i))^{1-y_i} p(\epsilon)p(\alpha)p(\beta) \, \mathrm d\alpha d\beta}
+$$
+We can see that the posterior law is quite complicated because of the non-linear function $\Phi$ and the constante normalization that don't have a closed form. We are goning to overcome this problem by introducing a second equivalent model. 
+
+The probit model can be review into an equivalent model by adding a latent variable Z. Indeed, we have :
+$P(Y=1|X=x)=P(V<\alpha+\beta x+\epsilon)\underset{-V\text{~}V}{=}P(0<\alpha+\beta x+\epsilon+V):=P(Z>0)$
+with $Z=\alpha+\beta x+\epsilon+V$ and $V\text{~}\mathcal{N}(0,\,1)$. 
+Thus we have : 
+y=$\mathbb{1}_{z>0}$
+
+If we can determine the conditional law $z|(\alpha, \beta), y, x$ and $(\alpha, \beta)|z,y,x$, we could then sample from the law $z, (\alpha, \beta)|y,x$ and so from the marginal $(\alpha, \beta)|y,x$ which is the posterior law needed. 
+
+Firstly, by linearity and independance of V and $\epsilon$ : $z|(\alpha, \beta), x$~$\mathcal{N}(\alpha + \beta x,\,2)$. Then on the event {y=1}={z>0}, $z|(\alpha, \beta), x$ ~ $\mathcal{TN}(\alpha + \beta x,\,2, 0, \infty)$ and on the event {y=0}={z<0}, $z|(\alpha, \beta), x$ ~ $\mathcal{TN}(\alpha + \beta x,\,2, -\infty, 0)$ with $\mathcal{TN}$ denoting the truncated normal law with the last two parameters corresponding to the truncation bound. We can rewrite the final conditionnal law :  
+$$z|(\alpha, \beta), y, x\text{ ~ } y\mathcal{TN}(\alpha + \beta x,\,2, 0, \infty) + (1-y)\mathcal{TN}(\alpha + \beta x,\,2, -\infty, 0)$$
+Secondly, we want to compute the law $(\alpha, \beta)|z,y,x$. We can first notice that knowing z, y is determinist (y=$\mathbb{1}_{z>0}$) and thus independant of $(\alpha, \beta)$. Then we obtain using the prior law given in the subject :
+
+$$\begin{aligned}
+p((\alpha, \beta)|z,y,x) &= p(\alpha, \beta|z,x)\\
+&\propto p(z,x|\alpha, \beta)p(\alpha, \beta) \\
+&= p(z|\alpha, \beta, x)p(x|\alpha, \beta)p(\alpha, \beta) \\
+&= p(z|\alpha, \beta, x)p(\alpha, \beta|x)p(x)  \\
+&\propto \prod_{i=1}^n p(z_i|\alpha, \beta, x_i)p(\alpha)p(\beta|x_i) \\
+&\propto \exp{-\frac{1}{2}(\sum_{i=1}^n\frac{(z_i-(\alpha + \beta x_i))^2}{2}+ \alpha^2 + \beta^2\overline{x}) } \\
+&= \exp{-\frac{1}{2}(\sum_{i=1}^n \frac{z_i^2+\alpha^2 + \beta^2 x_i^2 + 2\alpha \beta x_i -2z_i(\alpha +\beta x_i)}{2}+ \alpha^2 + \beta^2\overline{x}) } \\
+&\propto \exp{-\frac{1}{2}(\alpha^2(\frac{n}{2}+1) + \beta^2(\frac{\sum_{i=1}^nx_i^2}{2}+\overline{x}) + \frac{\alpha \beta \sum_{i=1}^n x_i}{2} + \frac{\beta \alpha \sum_{i=1}^n x_i}{2} -\sum_{i=1}^n z_i(\alpha +\beta x_i)) } \\
+&= \exp{-\frac{1}{2}((\alpha ~~~ \beta) A (\alpha ~~~ \beta)^T -2(\alpha ~~~ \beta)AA^{-1}(\frac{\sum_{i=1}^n z_i}{2} ~~\frac{\sum_{i=1}^n z_ix_i}{2})^T ) } \\
+\end{aligned}$$
+ We recognize a multidimensionnal law : 
+ $$
+ p((\alpha, \beta)|z,y,x) \text{ ~ } \mathcal{N}(A^{-1}(\frac{\sum_{i=1}^nz_i}{2} ~~\frac{\sum_{i=1}^nz_ix_i}{2})^T,\,A^{-1}) ~~\text{ with } A= 
+\begin{pmatrix} 
+\frac{n}{2}+1 & \frac{\sum_{i=1}^nx_i}{2} \\
+\frac{\sum_{i=1}^nx_i}{2} & \frac{\sum_{i=1}^nx_i^2}{2}+\overline{x} 
+\end{pmatrix}
+$$
+We can now simulate using gibbs sampling method with the two conditionnal law to obtain the posterior law of the parameters 
+
+```{r}
+# Library for multidimensionnal normal law
+library(MASS)
+# Library for truncated normal law
+library(truncnorm)
+
+infer.gibss = function(sample, prior_mean, prior_var, model='first'){ #model : 'first' for the question 1 to 8; 'second' for the question 9
+  
+  N = 10^4 #number of simulations for gibbs sampler
+  n = dim(sample)[2] #number of observation of the dataset
+  x = sample[1,] 
+  y = sample[2,]
+  if(model=='first'){
+    A = matrix(c(n/2 +1/prior_var[1], sum(x)/2, sum(x)/2, sum(x^2)/2+ 1/prior_var[2]), nrow=2, ncol=2, byrow=T) # covariance matrix of the conditionnal law (alpha, beta) |z, x, y
+  }
+  else if(model=='second'){ #remove the factor 1/2
+    A = matrix(c(n +1/prior_var[1], sum(x), sum(x), sum(x^2)+ 1/prior_var[2]), nrow=2, ncol=2, byrow=T) # covariance matrix of the conditionnal law (alpha, beta) |z, x, y
+  }
+  A_inv = solve(A) #inverse of A
+
+  #initialization of the parameters
+  z = rep(0, n)
+  gibbs_alpha = rep(0,N)
+  gibbs_beta = rep(0,N)
+
+  for (i in 2:N) {
+    
+    #sample from z|alpha, beta x, y :
+    
+    mu = gibbs_alpha[i-1] + gibbs_beta[i-1]*x #mean of the conditionnal law
+    TP = sum(y) # true positif = number of y such that y=1
+    if(TP==0){ #check if all the y=0
+      z = rtruncnorm(n, mean=mu, sd=1+1*(model=='first'), a=-Inf, b=0) #sd=2 if model=='first' else sd=2
+    }
+    else if(TP==n){ #check if all the y=1
+      z = rtruncnorm(n, mean=mu, sd=1+1*(model=='first'), a=0, b=Inf) #sd=2 if model=='first' else sd=2
+    }
+    else{
+      z[y == 0] = rtruncnorm(n-TP, mean=mu[y == 0], sd=1+1*(model=='first'), a=-Inf, b=0) 
+      z[y == 1] = rtruncnorm(TP, mean=mu[y == 1], sd=1+1*(model=='first'), a=0, b=Inf)
+    }
+    
+    #sample from (alpha, beta)|z, x, y :
+    
+    if(model=='first'){
+      B = c(sum(z)/2 +prior_mean[1]/prior_var[1], sum(z*x)/2 +prior_mean[2]/prior_var[2])
+    }
+    else if(model=='second'){ #remove the factor 1/2
+      B = c(sum(z) +prior_mean[1]/prior_var[1], sum(z*x) +prior_mean[2]/prior_var[2])
+    }
+    res = mvrnorm(1, A_inv%*%B, A_inv)
+    
+    #keep the value sampled
+    gibbs_alpha[i] = res[1]
+    gibbs_beta[i] = res[2]
+  }
+  
+  # create a dataframe with columns value (of the gibbs method) and label (alpha or beta). This kind of form will help us later for the plotting part
+  alpha = data.frame(value=gibbs_alpha) #create a dataframe for alpha's values
+  beta = data.frame(value=gibbs_beta) #create a dataframe for beta's values
+  alpha$label = 'alpha' #add its label
+  beta$label = 'beta' #add its label
+  parameter = data.frame(rbind(alpha, beta)) #create a final dataframe with columns value and label
+  
+  return (parameter)
+}
+```
+
+$\\$
+
+Perform the analysis for the following situations:
+
+4. a n-sample from the model with n = 20
+5. a n-sample from the model with n = 500
+6. a n-sample from the model, with n = 20, which exhibits one or several of the aforementioned
+pecularities
+7. a n-sample from the model, with n = 500, which exhibits one or several of the aforementioned
+pecularities.
+
+```{r, fig.width=12, fig.height=6}
+library('ggplot2') #graphical library
+
+#First, let's define three plot functions for the histogramme, mean estimator and autocorrelation :
+
+plot_hist = function(parameter){ #function to plot histogramme of alpha and beta in the same graph
+  
+  ggplot(parameter, aes(x=value, color=label, fill=label)) +
+  geom_histogram(aes(y=..density..), position="identity", alpha=0.5)+
+  geom_density(alpha=0.6)+
+  scale_color_manual(values=c("#999999", "#E69F00", "#56B4E9"))+
+  scale_fill_manual(values=c("#999999", "#E69F00", "#56B4E9"))+
+  labs(title="Parameters histogram plot",x="Values", y = "Density")+
+  theme_classic()
+}
+
+plot_mean = function(parameter, true_alpha, true_beta){ #function to plot the convergence of the mean of alpha and beta
+  
+  n = length(parameter$value)/2 # number of observation (values of alpha and beta ==> 2n)
+  
+  mean_alpha = cumsum(parameter$value[parameter['label']=='alpha'])/(1:n)#convergence of the mean of alpha
+  mean_beta = cumsum(parameter$value[parameter['label']=='beta'])/(1:n) #convergence of the mean of beta
+  
+  plot(mean_alpha,xlab="Number of simulations", ty="l", ylab="mean estimation", col="red", ylim=c(min(c(mean_alpha, mean_beta, true_alpha, true_beta)),max(c(mean_alpha, mean_beta, true_alpha, true_beta)))) #convergence of the mean estimators
+  lines(mean_beta, col="purple")
+  
+  lines(rep(true_alpha, n), col="green") #true value of alpha
+  lines(rep(true_beta, n), col="green") #true value of beta
+  text(x=c(0.85*n, 0.85*n), y=c(true_alpha, true_beta), pos=4, labels=c('true alpha', 'true beta'))
+  legend("center", legend=c("alpha estimator", "beta estimator"), col=c("red", "purple"), lty=c(1,1))
+}
+
+plot_autocorrelation = function(parameter){
+  
+  n = length(parameter$value)/2 # number of observation (values of alpha and beta ==> 2n)
+  
+  AutoCorrelation = acf(parameter$value[parameter['label']=='alpha'], plot=F)
+  plot(AutoCorrelation, main="alpha")
+  AutoCorrelation = acf(parameter$value[parameter['label']=='beta'], plot=F)
+  plot(AutoCorrelation, main="beta")
+}
+```
+
+```{r}
+#Let's generate our 2 dataset :
+set.seed(42) #to reproduce the result
+
+sample_20 = rgen(20) #dataset with n=20
+sample_500 = rgen(500) #dataset with n=500
+
+prior_mean_20 = c(0,0) #prior mean of the first dataset
+prior_mean_500 = c(0,0) #prior mean of the second dataset
+prior_var_20 = c(1,500/(1+abs(sum(sample_20[1,])))) #prior variance of the first dataset
+prior_var_500 = c(1,500/(1+abs(sum(sample_500[1,])))) #prior variance of the second dataset
+```
+__Remark__ : Instead of using $Var(\beta)=\frac{n}{\sum_{i=1}^nx_i}$ which can be not defined (negative or +$\infty$), we choose $Var(\beta)=\frac{n}{1 + |\sum_{i=1}^nx_i|}$ which is always defined.
+
+### A n-sample from the model, with n = 20 {-}
+```{r figs1, echo=TRUE, fig.width=12, fig.height=6, fig.cap="histogramme", fig.align = 'center'}
+#Then, plot the different results :
+
+parameter = infer.gibss(sample_20, prior_mean_20, prior_var_20) #run gibbs sampling
+plot_hist(parameter) #plot the histogramme
+```
+
+```{r figs2, echo=TRUE, fig.width=12, fig.height=6, fig.cap="mean convergence and autocorrelation function", fig.align = 'center'}
+par(mfrow = c(1, 3)) #three graphics in the same line
+plot_mean(parameter, sample_20[3], sample_20[4]) #plot the convergence of the mean through simulation
+plot_autocorrelation(parameter)
+```
+
+### A n-sample from the model, with n = 500 {-}
+```{r figs3, echo=TRUE, fig.width=12, fig.height=6, fig.cap="histogramme", fig.align = 'center'}
+parameter = infer.gibss(sample_500, prior_mean_500, prior_var_500)
+plot_hist(parameter) #plot the histogramme
+```
+
+```{r figs4, echo=TRUE, fig.width=12, fig.height=6, fig.cap="mean convergence and autocorrelation function", fig.align = 'center'}
+par(mfrow = c(1, 3)) #three graphics in the same line
+plot_mean(parameter, sample_500[3], sample_500[4]) #plot the convergence of the mean through simulation
+plot_autocorrelation(parameter)
+```
+
+### A n-sample from the model, with n = 20, which exhibits one or several of the aforementioned pecularities {-}
+```{r figs5, echo=TRUE, fig.width=12, fig.height=6, fig.cap="histogramme", fig.align = 'center'}
+parameter = infer.gibss(tr.dat(sample_20), prior_mean_20, prior_var_20)
+plot_hist(parameter) #plot the histogramme
+```
+
+```{r figs6, echo=TRUE, fig.width=12, fig.height=6, fig.cap="mean convergence and autocorrelation function", fig.align = 'center'}
+par(mfrow = c(1, 3)) #three graphics in the same line
+plot_mean(parameter, sample_20[3], sample_20[4]) #plot the convergence of the mean through simulation
+plot_autocorrelation(parameter)
+```
+
+### A n-sample from the model, with n = 500, which exhibits one or several of the aforementioned pecularities {-}
+
+```{r figs7, echo=TRUE, fig.width=12, fig.height=6, fig.cap="histogramme", fig.align = 'center'}
+parameter = infer.gibss(tr.dat(sample_500), prior_mean_500, prior_var_500)
+plot_hist(parameter) #plot the histogramme
+```
+
+```{r figs8, echo=TRUE, fig.width=12, fig.height=6, fig.cap="mean convergence and autocorrelation function", fig.align = 'center'}
+par(mfrow = c(1, 3)) #three graphics in the same line
+plot_mean(parameter, sample_500[3], sample_500[4]) #plot the convergence of the mean through simulation
+plot_autocorrelation(parameter)
+```
+
+We can notice first that the posterior laws in the 4 cases seem to follow a noramle law according to the figures \@ref(fig:figs1), \@ref(fig:figs3), \@ref(fig:figs5), \@ref(fig:figs7). This is consistent with the fact that the normal law family is a natural conjugate law (same prior and posterior law).
+
+Moreover, the simulations of the posterior laws have a low correlation that dissipates quickly through the time (\@ref(fig:figs2), \@ref(fig:figs4), \@ref(fig:figs6), \@ref(fig:figs8)). This explains the speed convergences of the average estimators as well as their quality (almost iid samples).
+
+When the dataset has not been modified, we can compare the convergence of the average estimators of $\alpha$ and $\beta$. We observe that for n = 20 observations, the average estimator of $\alpha$ and $\beta$ don't converge to their true value (\@ref(fig:figs2)). For n = 500, both the convergence for alpha and beta estimator improved (\@ref(fig:figs4)).
+
+When the dataset has been modified, the estimation of the parameter will be obviously different from what is expected. But we can notice that the estimation of $\alpha$ remains still close to the true value for n = 500, whereas the estimation of $\beta$ moved. This is due to the specification of the model where $\beta$ is linked with x (which has been changed with biai).
+
+Further analysis shows that these estimator are very dependant to the initialization value in the gibbs algorithm.
+
+$\\$
+
+8. Test the sensitivity of the prior by modifying one or several components.
+
+Recall that we have $\alpha \text{~}\mathcal{N}(0,\,1)$ and $\beta|x \text{~}\mathcal{N}(0,\,\frac{n}{\sum_{i=1}^nx_i})$ as a prior law. We are now considering $\alpha \text{~}\mathcal{N}(\mu_1,\,\sigma_1^2)$ and $\beta \text{~}\mathcal{N}(\mu_2,\,\sigma_2^2)$.
+
+In the gibbs sampling method, we could determine the posterior laws of the parameter thanks to $z|(\alpha, \beta), y, x$ and $(\alpha, \beta)|z,y,x$. The former conditionnal law remains the same as previously since it doesn't depend on the prior laws whereas the latter depend on the prior laws, and we have :
+
+$$\begin{aligned}
+p((\alpha, \beta)|z,y,x) &= p(\alpha, \beta|z,x)\\
+&\propto p(z,x|\alpha, \beta)p(\alpha, \beta) \\
+&= p(z|\alpha, \beta, x)p(x|\alpha, \beta)p(\alpha, \beta) \\
+&= p(z|\alpha, \beta, x)p(x)p(\alpha, \beta)  \\
+&= \prod_{i=1}^n p(z_i|\alpha, \beta, x_i)p(\alpha)p(\beta) \\
+&\propto \exp{-\frac{1}{2}(\sum_{i=1}^n\frac{(z_i-(\alpha + \beta x_i))^2}{2}+ \frac{(\alpha-\mu_1)^2}{\sigma_1^2} + \frac{(\beta-\mu_2)^2}{\sigma_2^2}) } \\
+&\propto \exp{-\frac{1}{2}(\alpha^2(\frac{n}{2}+\frac{1}{\sigma_1^2}) + \beta^2(\frac{\sum_{i=1}^nx_i^2}{2}+\frac{1}{\sigma_2^2}) + \frac{\alpha \beta \sum_{i=1}^n x_i}{2} + \frac{\beta \alpha \sum_{i=1}^n x_i}{2} -\sum_{i=1}^n z_i(\alpha +\beta x_i) -2\alpha\frac{\mu_1}{\sigma_1^2}-2\beta\frac{\mu_2}{\sigma_2^2}) } \\
+&= \exp{-\frac{1}{2}((\alpha ~~~ \beta) A (\alpha ~~~ \beta)^T -2(\alpha ~~~ \beta)AA^{-1}(\frac{\sum_{i=1}^n z_i}{2}+\frac{\mu_1}{\sigma_1^2} ~~~~~~\frac{\sum_{i=1}^n z_ix_i}{2}+\frac{\mu_2}{\sigma_2^2})^T ) } \\
+\end{aligned}$$
+ We recognize a multidimensionnal law : 
+ $$
+ p((\alpha, \beta)|z,y,x) \text{ ~ } \mathcal{N}(A^{-1}(\frac{\sum_{i=1}^n z_i}{2}+\frac{\mu_1}{\sigma_1^2} ~~~~~~\frac{\sum_{i=1}^n z_ix_i}{2}+\frac{\mu_2}{\sigma_2^2})^T,\,A^{-1}) ~~\text{ with } A= 
+\begin{pmatrix} 
+\frac{n}{2}+\frac{1}{\sigma_1^2} & \frac{\sum_{i=1}^nx_i}{2} \\
+\frac{\sum_{i=1}^nx_i}{2} & \frac{\sum_{i=1}^nx_i^2}{2}+\frac{1}{\sigma_2^2} 
+\end{pmatrix}
+$$
+Then, we can rerun the previous gibbs algorithm with the new conditionnal law. We have choose 3 different parameters of the normal prior laws :
+
+- $\mu_1=\mu_2=0  ~~~~~~~~ \sigma_1=\sigma_2=1$
+- $\mu_1=\mu_2=5  ~~~~~~~~ \sigma_1=\sigma_2=2$
+- $\mu_1=-2  ~~ \mu_2=2  ~~~~~~~~ \sigma_1=1  ~~ \sigma_2=3$
+
+```{r figs9, echo=TRUE, fig.width=12, fig.height=6, fig.cap="mean convergence", fig.align = 'center'}
+parameter = infer.gibss(sample_500, c(0,0), c(1,1))
+plot_mean(parameter, sample_500[3], sample_500[4]) #plot the convergence of the mean through simulation
+```
+
+```{r figs10, echo=TRUE, fig.width=12, fig.height=6, fig.cap="mean convergence", fig.align = 'center'}
+parameter = infer.gibss(sample_500, c(5,5), c(2,2))
+plot_mean(parameter, sample_500[3], sample_500[4]) #plot the convergence of the mean through simulation
+```
+
+```{r figs11, echo=TRUE, fig.width=12, fig.height=6, fig.cap="mean convergence", fig.align = 'center'}
+parameter = infer.gibss(sample_500, c(-2,2), c(1,3))
+plot_mean(parameter, sample_500[3], sample_500[4]) #plot the convergence of the mean through simulation
+```
+
+It seems that only alpha is sensitive to a variation of the components of the prior laws. By taking normal standard laws (\@ref(fig:figs9)) for the prior, we obtain the most precise convergences among our examples.
+
+$\\$
+
+9. Choose a simpler version of the model and check which type is more adequate for the data.
+
+We choose the same probit model with conitnuous uniform variable X in [-1, 1]. We also ommit the $\epsilon$ variables. The model become :
+
+$$
+ P(Y=1|X=x)=\Phi(\alpha+\beta x) \\
+ X \text{~ }\mathcal{U}([-1,\,1]) \\
+ \alpha \text{~}\mathcal{N}(0,\,1) ~~~~~~
+ \beta \text{~}\mathcal{N}(0,\,1)
+$$
+By ommiting the epsilon variable, we now have :
+$$z|(\alpha, \beta), y, x\text{ ~ } y\mathcal{TN}(\alpha + \beta x,\,1, 0, \infty) + (1-y)\mathcal{TN}(\alpha + \beta x,\,1, -\infty, 0)$$
+ie the variance of the truncated laws is 1 instead of 2. For the conditionnal law $(\alpha, \beta)|z,y,x$, we obtain the same result as previously by ommiting the factor $\frac{1}{2}$ for the mean and variance parameter :
+ $$
+ p((\alpha, \beta)|z,y,x) \text{ ~ } \mathcal{N}(A^{-1}(\sum_{i=1}^n z_i ~~~\sum_{i=1}^n z_ix_i)^T,\,A^{-1}) ~~\text{ with } A= 
+\begin{pmatrix} 
+n+1 & \sum_{i=1}^nx_i \\
+\sum_{i=1}^nx_i & \sum_{i=1}^nx_i^2+1
+\end{pmatrix}
+$$
+
+In addition to the gibbs estimator, we can now compute the maximum likelihood estimator (MLE). Indeed, without the previous unknown $\epsilon$ we have that :
+$$
+L(\alpha, \beta)=\prod_{i=1}^n p(y_i|x_i,\alpha,\beta) = \prod_{i=1}^n \Phi(\alpha+\beta x_i)^{y_i} (1-\Phi(\alpha+\beta x_i))^{1-y_i}
+$$
+By taking the log of L and then computing the gradient vector and hessian matrix of log(L), we can implemente the Newton's method to compute the MLE $\alpha$ and $\beta$ by iterating :
+
+$$
+\begin{pmatrix}
+\alpha \\[1mm]
+\beta \\[1mm]
+\end{pmatrix}_{t+1} = \begin{pmatrix}
+\alpha \\[1mm]
+\beta \\[1mm]
+\end{pmatrix}_{t}-Hess^{-1}(log(L(\alpha, \beta)_t))\nabla(log(L(\alpha, \beta)_t))
+$$
+We can use the glm function in R that implement MLE for the most famous Generalized linear model (including the probit model)
+
+
+```{r figs12, echo=TRUE, fig.width=12, fig.height=6, fig.cap="mean convergence", fig.align = 'center'}
+
+set.seed(42) #to reproduce the result
+sample = rgen(500, model='second')
+x = sample[1,]
+y = sample[2,]
+
+parameter = infer.gibss(sample, c(0,0), c(1,1), model='second') #gibbs sample of alpha, beta
+fit = glm(y~x, family=binomial(link = probit)) #mle model
+alpha_mle = fit$coefficients[1] #mle of alpha
+beta_mle = fit$coefficients[2] #mle of beta
+
+plot_mean(parameter, sample[3], sample[4]) #plot the convergence of the gibbs mean through simulation
+lines(rep(alpha_mle, length(parameter$value)/2), col='orange') #add the mle of alpha
+lines(rep(beta_mle, length(parameter$value)/2), col='blue') #add the mle of beta
+legend("center", legend=c("alpha gibbs estimator", "beta gibbs estimator", "alpha mle estimator", "beta mle estimator"), col=c("red", "purple", "orange", "blue"), lty=c(1,1,1,1))
+```
+We can also plot the density estimation of our sample with the Gibbs estimators.
+
+```{r figs13, echo=TRUE, fig.width=12, fig.height=6, fig.cap="density", fig.align = 'center'}
+
+plot(sample[1,], sample[2,], main='Density estimation with Gibbs estimator', pch=19, xlab='x', ylab='y') # plot x and y 
+
+lines(x=seq(-1, 1, length.out=500), y=pnorm(mean(parameter$value[parameter['label']=='alpha'])+mean(parameter$value[parameter['label']=='beta'])*seq(-1, 1, length.out=500)), col="red", lwd=2) #plot the estimate of E(y|x)
+
+legend("bottomright", legend="gibbs estimate of E(Y|X)", col="red", bty='n', lty=1, lwd=2, inset=c(0.02, 0.08), cex=1)
+```
+
+We can see that the new model still have biaises (and particularly for $\beta$) for both the MLE and gibbs method. However, the MLE is a bit more precise than the Gibbs method mean estimator (\@ref(fig:figs13)). By modifying the model, we have introduced a new method that seems more precise than the gibbs one when the number of observations is small.
+```{r}
+Sys.time()-time
+```
+
