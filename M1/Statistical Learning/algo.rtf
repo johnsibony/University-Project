@@ -1,0 +1,223 @@
+{\rtf1\ansi\ansicpg1252\cocoartf1404\cocoasubrtf470
+{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;\red53\green53\blue53;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww20480\viewh10320\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\i\b\fs24 \cf0 \ul \ulc0 # tps total : 2h\
+\
+
+\i0\b0 \ulnone \
+\
+#importation des jeux de donn\'e9s et initialisation des variables\
+x=as.matrix(read.table("http://www.cmap.polytechnique.fr/~giraud/MAP433/X.txt")) \
+y=as.matrix(read.table("http://www.cmap.polytechnique.fr/~giraud/MAP433/Y.txt"))\
+p=64\
+n=442\
+K=13\
+\
+
+\b #PARTIE I
+\b0 \
+\
+
+\b #N1 
+\b0 \
+#calcul de l\'92esperance empirique de chaque variable b\'eata\
+for (i in 1:p)\{\
+print(mean(x[,i]))\}\
+print(diag(var(x)))  #calcul de la variance empirique de chaque variable b\'eata\
+print(mean(y))\
+print(var(y))\
+install.packages("corrplot")\
+library("corrplot")\
+col=colorRampPalette(c("red", "white", "blue"))(20)\
+corrplot(cor(x), type="upper", col=col) \
+\
+
+\b #N2
+\b0 \
+#calcul de l\'92estimateur des moindre carr\'e9 ordinaire\
+mco=solve(aperm(x)%*%x)%*%aperm(x)%*%y\
+print(mco)\
+\pard\pardeftab560\slleading20\partightenfactor0
+\cf2 mcomax=order(abs(mco),decreasing=TRUE)[1:5] #les indices des 5 b\'eatas les plus importants\
+print(mcomax)\
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+\cf0 \
+\
+
+\b #PARTIE II
+\b0 \
+\
+#fonction du minimiseur b\'eata de la r\'e9gression Lasso\
+lassoMin=function(x,y,b0,tolerance,\uc0\u955 ) \{\
+b=b0      #initialisation de b\'eata\
+repeat \{   #tant que b\'eata ne converge pas suffisamment par rapport a la tol\'e9rance \
+c=b     #garde en m\'e9moire le pr\'e9c\'e9dent b\'eata pour verifier la tol\'e9rance\
+for(i in 1:p) \{\
+r=x[,i]%*%(y-x[,-i]%*%b[-i])    #R(j)\
+b[i]=r*max(0,1-(\uc0\u955 /abs(r))) \}\
+if(max(b-c)<=tolerance)\{\
+return (b) \}\
+\}\}\
+\
+\uc0\u955 max=max(abs(aperm(x)%*%y))     #\u955  annulateur (avec valeur absolu!)\
+\uc0\u955 =(seq(\u955 max/10^3,\u955 max,\u955 max/10^3))  #ensemble des \u955 \
+z=matrix(nrow=length(\uc0\u955 ), ncol=p, byrow=T)   #matrice ayant pour ligne les \u955  et pour colonne les coefficients#\
+\
+
+\b #N3
+\b0 \
+#cr\'e9ation de z\
+b0=rep(0,p);  \
+for(i in length(\uc0\u955 ):1)\{  #on commence par les plus grandes valeurs de \u955 \
+z[i,]=lassoMin(x,y,b0,0.1,\uc0\u955 [i])\
+b0=z[i,] #on initialise b\'eata au b\'eata pr\'e9c\'e9dent\
+\}\
+\
+
+\b #N4
+\b0 \
+#superposition des coordonn\'e9es de b\'eata\
+plot(z[,1]~log(\uc0\u955 ),xlab='Log \u955 ', ylab='Coefficients B\'eata',type='l',ylim=c(min(z),max(z)),main="Evolution des p coefficients B\'eata en fonction de \u955 "\'a0)\
+for (i in 2:p)\{\
+lines(z[,i]~log(\uc0\u955 ), type='l',col=i)\}\
+get("quartz")() #cr\'e9e une nouvelle fen\'eatre graphique pour les prochains graphes\
+\
+
+\b #PARTIE III
+\b0 \
+\
+
+\b #N5
+\b0 \
+# calcul de l\'92estimateur cross-valid\'e9\
+R=rep(0,length(\uc0\u955 )) #risque empirique\
+for (k in 1:K)\{\
+I=seq((1+(k-1)*n/K),(k*n/K),1)  #ensemble des indices (K divise n ici)\
+b0=rep(0,p) \
+for(i in length(\uc0\u955 ):1)\{  #on commence par les plus grandes valeurs de \u955 \
+z[i,]=lassoMin(x[-I,],y[-I],b0,0.1,\uc0\u955 [i])   #on remplit z ligne par ligne\
+b0=z[i,]\
+R[i]=R[i]+sum((y[I,]-x[I,]%*%z[i,])^2) #on remplit R, coordonn\'e9es par coordonn\'e9es (les \uc0\u955 )\
+\} \
+\}\
+R=R/K\
+\uc0\u955 sol=\u955 [order(R)[1]] #on prend la premi\'e8re plus petite coordonn\'e9e \u955  qui minimise R\
+print(\uc0\u955 sol)\
+#calcul de l\'92estimateur au \uc0\u955  minimiseur\
+bsol=lassoMin(x,y,rep(0,p),0.1,\uc0\u955 sol)\
+Rsol=min(R)\
+print(bsol)\
+print(Rsol)\
+\
+#visualisation graphique du risque empirique selon \uc0\u955 \
+plot(log(\uc0\u955 ),R,xlab='Log \u955 ', ylab='Fonction risque empirique',type='l',col="red"\'a0,main="Evolution du risque empirique selon \u955 ")\
+abline(v=log(\uc0\u955 sol),ylab='min',col="blue") #ligne verticale du minimum\
+text(log(\uc0\u955 sol),2600000, "\'a0Argmin de la fonction\'a0") #affiche texte sur le graphique\
+get("quartz")() #cr\'e9e une nouvelle fen\'eatre graphique pour les prochains graphes\
+\
+
+\b #N6
+\b0 \
+indice=as.numeric(bsol!=0) #vecteur binaire (0: coefficient nul, 1: coefficient non nul)\
+indice[mcomax]  # renvoie (0,0,0,0,0)
+\b \
+
+\b0 #On remarque que les 5 variables les plus importantes du mco sont nulles pour l\'92estimation lasso\
+\
+
+\b #PARTIE IV
+\b0 \
+\pard\pardeftab560\slleading20\partightenfactor0
+\cf0 \
+
+\b #N7
+\b0 \
+\uc0\u956 =c(0, 0.01, 0.02, 0.05, 0.1, 1)  # rem : le cas \u956 =0 a deja \'e9t\'e9 trait\'e9 dans la Partie II\
+names(\uc0\u956 )=c("u=0","u=0.01","u=0.02","u=0.05","u=0.1","u=1") #on nomme les coordonn\'e9es de \u956  pour afficher ce texte sur les prochains graphiques
+\fs22 \
+\
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\fs24 \cf0 #nouvelle fonction du minimiseur b\'eata de la r\'e9gression Elastic-Net\
+lassoMinBis=function(x,y,b0,tolerance,\uc0\u955 ,\u956 ) \{\
+b=b0      #initialisation de b\'eata\
+repeat \{   #tant que b\'eata ne converge pas suffisamment par rapport a la tol\'e9rance \
+c=b     #garde en m\'e9moire le pr\'e9c\'e9dent b\'eata pour verifier la tol\'e9rance\
+for(i in 1:p) \{\
+r=x[,i]%*%(y-x[,-i]%*%b[-i])    #R(j)\
+b[i]=(r*max(0,1-(\uc0\u955 /abs(r))))/(1+\u956 ) \}  #seule modification : on divise par 1+\u956 \
+if(max(b-c)<=tolerance)\{\
+return (b) \} \
+\}\}
+\fs22 \
+\pard\pardeftab560\slleading20\partightenfactor0
+\cf0 \
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\fs24 \cf0 #cr\'e9ation de z (matrice des b\'eatas selon \uc0\u955 ) avec sa repr\'e9sentation graphique pour chaque \u956 \
+layout(matrix(c(1:6),2,3,T)) #partition en 6 parties de la fen\'eatre graphique  \
+for(j in 1:length(\uc0\u956 ))\{\
+b0=rep(0,p); \
+for(i in length(\uc0\u955 ):1)\{  #on commence par les plus grandes valeurs de \u955 \
+z[i,]=lassoMinBis(x,y,b0,0.1,\uc0\u955 [i],\u956 [j])\
+b0=z[i,]\
+\}\
+#superposition des coordonn\'e9es de b\'eata pour un \uc0\u956  fix\'e9
+\fs22 \
+
+\fs24 plot(z[,1]~log(\uc0\u955 ),xlab='Log \u955 ', ylab='Coefficients B\'eata',type='l',ylim=c(min(z),max(z)),main="Evolution des p coefficients B\'eata en fonction de \u955  et \u956 "\'a0)\
+text(mean(log(\uc0\u955 )),max(z), names(\u956 [j])) #affiche texte sur le graphique\
+for(i in 2:p) \{\
+lines(z[,i]~log(\uc0\u955 ), type='l',col=i)\}\
+\}\
+\pard\pardeftab560\slleading20\partightenfactor0
+\cf0 \
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\b \cf0 #N8\
+
+\b0 \
+# calcul de l\'92estimateur cross-valid\'e9\
+S=matrix(rep(0,length(\uc0\u955 )*length(\u956 )),length(\u956 ),length(\u955 )) #matrice du risque empirique pour chaque \u956 \
+R=rep(0,length(\uc0\u955 ))   #risque empirique pour un \u956 \
+for(u in 1:length(\uc0\u956 ))\{\
+for(k in 1:K)\{\
+I=seq((1+(k-1)*n/K),(k*n/K),1)  #ensemble des indices (K divise n ici)\
+b0=rep(0,p)  \
+for(i in length(\uc0\u955 ):1)\{  #on commence par les plus grandes valeurs de \u955 \
+z[i,]=(1+\uc0\u956 [u])*lassoMinBis(x[-I,],y[-I],b0,0.1,\u955 [i],\u956 [u])   #on remplit z ligne par ligne \
+b0=z[i,]\
+R[i]=R[i]+sum((y[I,]-x[I,]%*%z[i,])^2) #on remplit R\
+\} \
+\}\
+S[u,]=R\
+\}\
+S=S/K\
+Sbis=c(min(S[1,]),min(S[2,]),min(S[3,]),min(S[4,]),min(S[5,]),min(S[6,])) #on s\'e9pare les lignes de S pour savoir dans quelle ligne de S se trouve le minimum de la matrice\
+\uc0\u956 sol=\u956 [order(Sbis)[1]]  #le minimum
+\b  
+\b0 de S se trouve sur la ligne n\'b0order(Sbis)\
+\uc0\u955 sol=\u955 [ order(S[order(Sbis)[1],])[1] ] #on prend la premiere plus petite coordonn\'e9e \u955  qui minimise S et qui se trouve sur la ligne calculer pr\'e9c\'e9demment \
+print(\uc0\u956 sol)\
+print(\uc0\u955 sol)\
+\
+\
+#calcul de l\'92estimateur et du risque quadratique au \uc0\u955  et \u956  minimiseur\
+bsol=lassoMinBis(x,y,rep(0,p),0.1,\uc0\u955 sol, \u956 sol)\
+SsolBis=S[\uc0\u956 sol][\u955 sol]\
+print(bsol)\
+print(SsolBis)\
+print(SsolBis<Rsol)  #a-ton un gain compar\'e9 au Lasso ? Non ici, les 2 sont m\'eame \'e9gaux!\
+\
+indice=as.numeric(bsol!=0) #vecteur binaire (0: coefficient nul, 1: coefficient non nul)\
+indice[mcomax]  # renvoie (0,0,0,0,0)
+\b \
+
+\b0 #On remarque que les 5 variables les plus importantes du mco sont nulles pour l\'92estimation Elastic-Net\
+\
+\
+\
+}
